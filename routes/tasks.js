@@ -208,6 +208,12 @@ module.exports = function (router) {
             var newAssignedUser = req.body.assignedUser || "";
             var newCompleted = req.body.completed !== undefined ? req.body.completed : false;
 
+            if (task.completed && oldAssignedUser !== newAssignedUser) {
+                return res.status(400).json({
+                    message: "Cannot reassign a completed task.",
+                    data: {}
+                });
+            }
             task.name = req.body.name;
             task.description = req.body.description || "";
             task.deadline = req.body.deadline;

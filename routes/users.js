@@ -213,11 +213,33 @@ module.exports = function (router) {
             var oldPendingTasks = user.pendingTasks || [];
             var newPendingTasks = req.body.pendingTasks || [];
 
-            user.name = req.body.name;
-            user.email = req.body.email;
-            user.pendingTasks = newPendingTasks;
+            if (newPendingTasks.length > 0) {
+                Task.find({ _id: { $in: newPendingTasks }, completed: true }, function (err, completedTasks) {
+                    if (err) {
+                        return res.status(500).json({
+                            message: "Error checking tasks.",
+                            data: {}
+                        });
+                    }
+                    if (completedTasks && completedTasks.length > 0) {
+                        return res.status(400).json({
+                            message: "Cannot add completed tasks to pending tasks.",
+                            data: {}
+                        });
+                    }
 
-            user.save(function (err, updatedUser) {
+                    updateUserAndTasks();
+                });
+            } else {
+                updateUserAndTasks();
+            }
+
+            function updateUserAndTasks() {
+                user.name = req.body.name;
+                user.email = req.body.email;
+                user.pendingTasks = newPendingTasks;
+
+                user.save(function (err, updatedUser) {
                 if (err) {
                     if (err.code === 11000) {
                         return res.status(400).json({
@@ -231,15 +253,17 @@ module.exports = function (router) {
                     });
                 }
 
+                //@325 said  remove same tasks from other users when reassigning to this user. IMP for hidden prob
+                if (newPendingTasks.length > 0) {
+                    User.updateMany(
+                        { _id: { $ne: user._id }, pendingTasks: { $in: newPendingTasks }},
+                        { $pull: { pendingTasks: { $in: newPendingTasks }}},
+                    );
+                }
                 // Update new pending tasks to reference this user main thing IMP
                 Task.updateMany(
                     { _id: { $in: newPendingTasks } },
                     { $set: { assignedUser: user._id.toString(), assignedUserName: user.name } },
-                    function (err) {
-                        if (err) {
-                            console.error("Error updating assigned tasks:", err);
-                        }
-                    }
                 );
 
                 // Unassign tasks that are no longer in pendingTasks. main thing IMP
@@ -251,11 +275,6 @@ module.exports = function (router) {
                     Task.updateMany(
                         { _id: { $in: removedTasks } },
                         { $set: { assignedUser: "", assignedUserName: "unassigned" } },
-                        function (err) {
-                            if (err) {
-                                console.error("Error unassigning removed tasks:", err);
-                            }
-                        }
                     );
                 }
 
@@ -264,6 +283,7 @@ module.exports = function (router) {
                     data: updatedUser
                 });
             });
+            }
         });
     });
 
@@ -286,12 +306,7 @@ module.exports = function (router) {
             // Unassign all tasks that were assigned to this user. main thing IMP
             Task.updateMany(
                 { assignedUser: req.params.id },
-                { $set: { assignedUser: "", assignedUserName: "unassigned" } },
-                function (err) {
-                    if (err) {
-                        console.error("Error unassigning user's tasks:", err);
-                    }
-                }
+                { $set: { assignedUser: "", assignedUserName: "unassigned" } }
             );
 
             return res.status(204).send(); //post @292 says The code 204 should be used when the request is successful but has no response body.
